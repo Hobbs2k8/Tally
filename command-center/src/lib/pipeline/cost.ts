@@ -4,6 +4,9 @@
 import type { Usage } from "../providers/types";
 
 const KNOWN: Record<string, { inPerM: number; outPerM: number }> = {
+  // Introductory standard-tier price through 2026-12-31 (ai.google.dev "What's new in Gemini 3.8 Flash");
+  // $1.50 / $7.50 from 2027-01-01. Update this line after that date.
+  "gemini-3.8-flash": { inPerM: 0.75, outPerM: 3.75 },
   // Google AI Studio list prices (paid tier, text, <=200k context) as published for these models.
   "gemini-2.5-flash": { inPerM: 0.3, outPerM: 2.5 },
   "gemini-2.5-flash-lite": { inPerM: 0.1, outPerM: 0.4 },

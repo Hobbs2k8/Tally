@@ -13,7 +13,8 @@
     "hero": "tsx scripts/hero.ts",
     "eval": "tsx eval/run.ts",
     "gemini:models": "tsx scripts/gemini-models.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "eval:report": "tsx eval/rerender.ts"
   },
   "dependencies": {
     "@google/genai": "1.52.0",

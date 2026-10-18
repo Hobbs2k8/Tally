@@ -145,10 +145,11 @@ interface CaseResult {
   error?: string;
 }
 
-async function runSystem(name: string, provider: ReasoningProvider): Promise<CaseResult[]> {
+async function runSystem(name: string, provider: ReasoningProvider, stats?: { waitedMs: number }): Promise<CaseResult[]> {
   const out: CaseResult[] = [];
   for (const c of CASES) {
     clearCaches();
+    const waited0 = stats?.waitedMs ?? 0;
     const t0 = performance.now();
     let r: PipelineResult;
     try {
@@ -157,7 +158,8 @@ async function runSystem(name: string, provider: ReasoningProvider): Promise<Cas
       out.push({ id: c.id, split: c.split, tags: c.tags, system: name, kind: "error", matchOk: false, intent: { checked: 0, correct: 0, misses: [] }, records: null, routing: null, calc: null, feasibility: null, ms: performance.now() - t0, usage: { calls: 0, inputTokens: 0, outputTokens: 0, model: null }, costUsd: null, error: String(e) });
       continue;
     }
-    const ms = performance.now() - t0;
+    // Exclude time spent waiting on rate-limit pacing: latency is model + engine time.
+    const ms = performance.now() - t0 - ((stats?.waitedMs ?? 0) - waited0);
     const e = c.expect;
     const matchOk = c.companyId === null && e.company ? (e.company === "clarify" ? r.kind === "clarify" : r.kind === "plan" && r.company.id === e.company) : null;
     const intent = intentChecks(c, r);
@@ -210,7 +212,7 @@ async function anomalyEval(llm: ReasoningProvider | null) {
     }
     rows.push({ system: "engine", companyId: id, kind: "false_positive_on_clean_data", plantedId: "", detected: cleanFindings.length > 0, count: cleanFindings.length });
     if (llm) {
-      const r = await plainLlmAnomalies(sdkClient(key!), llm.model()!, data);
+      const r = await plainLlmAnomalies(evalClient!, llm.model()!, data);
       for (const p of planted) rows.push({ system: "plain-llm", companyId: id, kind: p.kind, plantedId: p.plantedId, detected: r.ids.includes(p.plantedId) });
       rows.push({ system: "plain-llm", companyId: id, kind: "flagged_ids", plantedId: r.ids.join(","), detected: false, usage: r.usage });
     }
@@ -230,7 +232,7 @@ async function anomalyEval(llm: ReasoningProvider | null) {
 
 // ---------- plain LLM baseline ----------
 async function runPlainLlm(provider: InstanceType<typeof GeminiProvider>) {
-  const client = sdkClient(key!);
+  const client = evalClient!;
   const model = provider.model()!;
   const out = [];
   for (const c of CASES) {
@@ -238,7 +240,9 @@ async function runPlainLlm(provider: InstanceType<typeof GeminiProvider>) {
     if (!companyId) continue; // matching is not part of this baseline
     const d = loadCompany(companyId);
     const inputs = buildInputs(d);
+    const waited0 = client.stats!.waitedMs;
     const t0 = performance.now();
+    const elapsed = () => performance.now() - t0 - (client.stats!.waitedMs - waited0);
     try {
       const r = await plainLlmCase(client, model, d, inputs, c.prompt);
       const truth = reportTruth(d);
@@ -265,8 +269,8 @@ async function runPlainLlm(provider: InstanceType<typeof GeminiProvider>) {
         const st = project(inputs, { ...levers, paymentDelayDays: c.expect.paymentDelayDays ?? 30 }, reserve, 13);
         violates = base.summary.minCash < reserve || st.summary.minCash < 0;
       }
-      out.push({ id: c.id, split: c.split, ms: performance.now() - t0, calc: { checked: checked.length, correct: checked.length - misses.length, misses }, planViolatesReserve: violates, claimedSafe: r.answer.planIsSafe, usage: r.usage, costUsd: estimateCost(r.usage) });
-      process.stdout.write(`  plain-llm ${c.id.padEnd(28)} ${Math.round(performance.now() - t0)} ms calc ${checked.length - misses.length}/${checked.length}${violates !== null ? ` plan violates: ${violates}` : ""}\n`);
+      out.push({ id: c.id, split: c.split, ms: elapsed(), calc: { checked: checked.length, correct: checked.length - misses.length, misses }, planViolatesReserve: violates, claimedSafe: r.answer.planIsSafe, usage: r.usage, costUsd: estimateCost(r.usage) });
+      process.stdout.write(`  plain-llm ${c.id.padEnd(28)} ${Math.round(elapsed())} ms calc ${checked.length - misses.length}/${checked.length}${violates !== null ? ` plan violates: ${violates}` : ""}\n`);
     } catch (e) {
       out.push({ id: c.id, split: c.split, ms: performance.now() - t0, error: String(e).slice(0, 200) });
       process.stdout.write(`  plain-llm ${c.id} ERROR ${String(e).slice(0, 120)}\n`);
@@ -283,12 +287,14 @@ await runPipeline(CASES[0].prompt, { companyId: CASES[0].companyId, provider: ne
 systems["deterministic"] = await runSystem("deterministic", new DeterministicProvider());
 
 let gemini: InstanceType<typeof GeminiProvider> | null = null;
+let evalClient: ReturnType<typeof sdkClient> | null = null;
 let plainLlm: Awaited<ReturnType<typeof runPlainLlm>> | null = null;
 if (key && !only) {
-  gemini = new GeminiProvider(sdkClient(key), key, process.env.GEMINI_MODEL || null);
+  evalClient = sdkClient(key, { waitOn429: true, minIntervalMs: Number(process.env.EVAL_MIN_INTERVAL_MS ?? 4000) });
+  gemini = new GeminiProvider(evalClient, key, process.env.GEMINI_MODEL || null);
   await gemini.ensureModel();
   console.log(`Gemini model: ${gemini.model()}`);
-  systems["gemini+engine"] = await runSystem("gemini+engine", gemini);
+  systems["gemini+engine"] = await runSystem("gemini+engine", gemini, evalClient.stats);
   plainLlm = await runPlainLlm(gemini);
 } else {
   console.log("GEMINI_API_KEY not set: plain-LLM and Gemini+engine systems are not measured.");

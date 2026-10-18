@@ -68,7 +68,7 @@ request ─▶ intent (Gemini structured output → Zod; retry once; else regex 
 | Provider | Status |
 |---|---|
 | `DeterministicProvider` (`src/lib/providers/deterministic.ts`) | **Real, and the default when no key is set.** Regex intent parser and token-overlap company matching. Also the eval baseline |
-| `GeminiProvider` (`src/lib/providers/gemini.ts`) | **Implemented, used automatically when `GEMINI_API_KEY` is set.** Picks the newest stable Flash model available to the key at runtime (no hardcoded model id) unless `GEMINI_MODEL` is set. Unit-tested with a fake client (validation, retry, fallback, auth errors, invented ids, ungrounded numbers). **It has not been run against the live API in this repo yet: no key was available while we built it.** |
+| `GeminiProvider` (`src/lib/providers/gemini.ts`) | **Real, used automatically when `GEMINI_API_KEY` is set.** Picks the newest stable Flash model available to the key at runtime (no hardcoded model id) unless `GEMINI_MODEL` is set. On 2026-10-18 the key resolved to `gemini-3.8-flash`. **Verified live** on the hero question: Gemini returned a schema-valid task, and its wording passed the number-grounding check (about 6 s per request, from two model calls of roughly 2.5–3.7 s each). The live runs also exercised the two safety nets: one rewording was rejected because it cited numbers not in the facts, and quota (429) errors fell back to the rules in about 200 ms. Also unit-tested with a fake client (validation, retry, fallback, auth errors, invented ids, ungrounded numbers). |
 | `SystemOneProvider` (`src/lib/providers/systemone.ts`) | **Stub.** It delegates to the deterministic rules and reports `fellBack: true`, so nothing is ever labeled as System One output. The file documents the exact interface. Wiring in System One / TypeSafe Jev is a one-file change plus `REASONING_PROVIDER=systemone` |
 
 We make no System One performance claims.
@@ -97,7 +97,7 @@ Current results, deterministic system (the only one measured so far):
 | Planted anomalies caught | 12/12 |
 | p50 latency | under 10 ms |
 
-There are still false positives on clean data (19 of 100 companies flagged). **The plain-LLM and Gemini + engine columns say "not measured" until the eval is run with a key.**
+There are still false positives on clean data (19 of 100 companies flagged). **The plain-LLM and Gemini + engine columns are still "not measured".** The available key is on Gemini's free tier, which allows 20 requests per model per day, and a full run needs about 100 calls. With a billed key, `npm run eval` paces its calls and waits out per-minute 429s automatically. It gives up on daily-quota errors instead of sleeping for hours.
 
 ## Chat agent on Agentverse (ASI:One)
 
@@ -130,7 +130,7 @@ None in the app. See `docs/SYNTHETIC_CHANGES.md`: the eval plants two anomalies 
 - Behaviour of customers and suppliers (paying faster, accepting longer terms, reacting to price) is an assumption, always labeled and editable, never data.
 - Anomaly rules still flag some legitimate charges (see the eval).
 - The deterministic parser covers the question shapes in `eval/cases.ts` and similar phrasings. Unusual phrasing needs Gemini, and an unparsed constraint, e.g. "never dropping below $X", is missed by the rules.
-- Gemini integration is unverified against the live API (see above).
+- Gemini is verified live on individual requests, but not yet across the eval suite (free-tier quota; see above).
 
 ## 2-minute demo script
 

@@ -196,7 +196,7 @@ export async function runPipeline(request: string, opts: RunOptions = {}): Promi
           log("warn", "explanation rejected", { requestId, ungrounded: check.ungrounded.join(",") });
           return { text: draft, source: "template" as const, rejected: `model text cited numbers not in the engine's facts: ${check.ungrounded.join(", ")}` };
         }
-        return { text: r.text.trim(), source: "model" as const };
+        return { text: r.text.replace(/\s+/g, " ").trim(), source: "model" as const };
       } catch (e) {
         log("warn", "explain failed", { requestId, error: e instanceof Error ? e.message : String(e) });
         return { text: draft, source: "template" as const };
@@ -439,12 +439,16 @@ function bottomLineDraft(
   }
   if (!r.sim && r.findings?.length && r.answer) parts.push(`Also flagged: ${lowerFirst(r.findings[0].title)}.`);
   if (r.leaks?.length && mode === "plan" && !r.sim) parts.push(`Biggest profit leak: ${lowerFirst(r.leaks[0].title)} (about ${fact("top leak", usd(r.leaks[0].annualImpact))} a year).`);
-  for (const l of r.leaks ?? []) fact(l.title, usd(l.annualImpact));
-  for (const f of r.findings ?? []) if (f.amount) fact(f.title, usd(f.amount));
+  // Titles are engine-generated text, so every number in them is grounded too.
+  for (const l of r.leaks ?? []) fact(l.title, `${l.title} ${usd(l.annualImpact)}`);
+  for (const f of r.findings ?? []) fact(f.title, `${f.title} ${f.amount ? usd(f.amount) : ""}`);
   fact("cash", usd(inputs.openingCash));
   fact("weekly payroll", usd(inputs.weeklyPayroll));
   void data;
-  return { draft: parts.join(" ") || `Here is what the books show for ${data.name}.`, facts };
+  const draft = parts.join(" ") || `Here is what the books show for ${data.name}.`;
+  // The draft is built only from engine values, so its numbers are allowed in the rewording.
+  facts.push({ label: "deterministic draft", text: draft });
+  return { draft, facts };
 }
 
 function validate(data: CompanyData, inputs: ProjectionInputs, sim: SimulationResult | null, assumptions: Assumption[] | null): ValidationCheck[] {

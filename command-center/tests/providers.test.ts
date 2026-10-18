@@ -6,7 +6,7 @@ import { clearCaches, runPipeline } from "../src/lib/pipeline/run";
 import { emptyTask, TaskSchema } from "../src/lib/pipeline/task";
 import { parseMoney, parseTask, rankByOverlap } from "../src/lib/providers/deterministic";
 import type { GenerateClient } from "../src/lib/providers/gemini";
-import { GeminiProvider } from "../src/lib/providers/gemini";
+import { GeminiProvider, retryDelaySeconds } from "../src/lib/providers/gemini";
 import { pickFlashModel } from "../src/lib/providers/gemini-models";
 import { SystemOneProvider } from "../src/lib/providers/systemone";
 
@@ -143,6 +143,20 @@ describe("explanation grounding", () => {
   it("accepts cited facts and small counts, rejects invented numbers", () => {
     expect(numbersGrounded("Chase the $24,778 first and hire 2 people; test a 30-day slip.", facts).ok).toBe(true);
     expect(numbersGrounded("You will save $5,000.", facts)).toMatchObject({ ok: false, ungrounded: [5000] });
+  });
+});
+
+describe("rate limits", () => {
+  it("reads Gemini's retry delay from a 429 error", () => {
+    expect(retryDelaySeconds('ApiError: {"error":{"code":429,"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"21s"}]}}')).toBe(21);
+    expect(retryDelaySeconds('{\\"retryDelay\\": \\"7.5s\\"}')).toBe(7.5);
+    expect(retryDelaySeconds("some other error")).toBeNull();
+  });
+  it("a 429 in the app falls back to the rules", async () => {
+    const client = fake([new Error('ApiError: {"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}')]);
+    const r = await new GeminiProvider(client, null, "test-flash").extractIntent(HERO_QUESTION);
+    expect(r.fellBack).toBe(true);
+    expect(r.task.decisions.hireCount).toBe(2);
   });
 });
 

@@ -13,14 +13,59 @@ import { NO_USAGE } from "./types";
 
 /** The part of the SDK we use, so tests can inject a fake. */
 export interface GenerateClient {
+  /** Time spent waiting on pacing / rate limits (not model time), for honest latency numbers. */
+  stats?: { waitedMs: number };
   generate(req: { model: string; system: string; user: string; jsonSchema?: object; maxOutputTokens?: number }): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
 }
 
-export function sdkClient(apiKey: string): GenerateClient {
+/** Seconds Gemini asks us to wait after a 429, if it says. */
+export function retryDelaySeconds(err: unknown): number | null {
+  const m = String(err).match(/retryDelay\\?"?\s*:\s*\\?"(\d+(?:\.\d+)?)s/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * opts.waitOn429: when Gemini rate-limits, wait the delay it asks for and retry
+ * (up to 3 times). Used by the eval so quota limits do not distort accuracy.
+ * The app leaves it off: a 429 falls back to the deterministic rules at once.
+ * opts.minIntervalMs: space calls out (simple client-side pacing).
+ */
+export function sdkClient(apiKey: string, opts: { waitOn429?: boolean; minIntervalMs?: number } = {}): GenerateClient {
   const ai = new GoogleGenAI({ apiKey });
   let thinkingOff = true;
-  return {
-    async generate({ model, system, user, jsonSchema, maxOutputTokens }) {
+  let last = 0;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const client: GenerateClient = {
+    stats: { waitedMs: 0 },
+    async generate(req) {
+      for (let attempt = 0; ; attempt++) {
+        if (opts.minIntervalMs) {
+          const wait = last + opts.minIntervalMs - Date.now();
+          if (wait > 0) {
+            await sleep(wait);
+            client.stats!.waitedMs += wait;
+          }
+          last = Date.now();
+        }
+        try {
+          return await once(req);
+        } catch (e) {
+          if (!opts.waitOn429 || !/\b429\b|RESOURCE_EXHAUSTED/.test(String(e)) || attempt >= 3) throw e;
+          const delay = retryDelaySeconds(e) ?? 20;
+          // A long delay means a daily quota, not a per-minute one: give up rather than sleep for hours.
+          if (delay > 90) throw new Error(`Gemini quota exhausted (retry in ${Math.round(delay / 60)} min): ${String(e).slice(0, 160)}`);
+          const ms = (delay + 1) * 1000;
+          await sleep(ms);
+          client.stats!.waitedMs += ms;
+          last = Date.now();
+        }
+      }
+    },
+  };
+  return client;
+
+  async function once({ model, system, user, jsonSchema, maxOutputTokens }: Parameters<GenerateClient["generate"]>[0]) {
+    {
       const call = (noThinking: boolean) =>
         ai.models.generateContent({
           model,
@@ -49,8 +94,8 @@ export function sdkClient(apiKey: string): GenerateClient {
         inputTokens: u?.promptTokenCount ?? 0,
         outputTokens: (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0),
       };
-    },
-  };
+    }
+  }
 }
 
 /** Gemini-friendly JSON schema from Zod: draft 2020-12 without the $schema key. */
@@ -83,8 +128,9 @@ Return up to 5 candidates with a score from 0 to 1. Score 0.9+ only when the req
 const EXPLAIN_SYSTEM = `You write the bottom line of a financial action plan for a small-business owner: one or two plain sentences.
 Hard rules:
 - Use ONLY numbers that appear in the FACTS list, written exactly as given (e.g. "$24,778", "30 days"). Do not compute, round, add, or invent any number.
-- Lead with the decision, then the key number. No hedging, no greetings, no markdown.
-- Keep it under 70 words. You may reuse the DRAFT's structure.`;
+- Keep every recommended step from the DRAFT (for example who to chase, when to hire, when and how much to draw, supplier terms). Do not drop or merge steps, and do not add steps.
+- Lead with the decision, then the key numbers. No hedging, no greetings, no markdown.
+- Keep it under 80 words. Plainer wording than the DRAFT is the goal; facts and steps stay the same.`;
 
 export class GeminiProvider implements ReasoningProvider {
   readonly name = "gemini" as const;
