@@ -72,9 +72,11 @@ export function parseTask(request: string): Task {
   }
 
   // Pricing
-  if (/(raise|increase|hike|lift|cut|lower|reduce|drop)\s+(?:our |my )?prices?|price (increase|hike|cut|change)/.test(s)) {
+  const PRICE_UP = /(rais(?:e|ing)|increas(?:e|ing)|hik(?:e|ing)|lift(?:ing)?|bump(?:ing)?)\s+(?:our |my |all )?prices?|price (increase|hike|change)/;
+  const PRICE_DOWN = /(cut(?:ting)?|lower(?:ing)?|reduc(?:e|ing)|drop(?:ping)?)\s+(?:our |my |all )?prices?|price cut/;
+  if (PRICE_UP.test(s) || PRICE_DOWN.test(s)) {
     const p = pctNear(s, /price/);
-    const down = /(cut|lower|reduce|drop)\s+(?:our |my )?prices?|price cut/.test(s);
+    const down = PRICE_DOWN.test(s) && !PRICE_UP.test(s);
     d.priceChangePct = p !== null ? (down ? -p : p) : down ? -0.05 : 0.05;
   }
 

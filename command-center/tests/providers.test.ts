@@ -53,6 +53,11 @@ describe("deterministic parser", () => {
     expect(t.questionKind).toBe("top_debtors");
   });
 
+  it("parses gerund price changes", () => {
+    expect(parseTask("I'm raising prices 3% next month").decisions.priceChangePct).toBe(0.03);
+    expect(parseTask("what if we are cutting prices by 10%").decisions.priceChangePct).toBe(-0.1);
+  });
+
   it("routes a simple question to one capability", () => {
     const r = route(parseTask("Why is my profit different from my cash?"));
     expect(r.capabilities).toEqual(["future_accountant"]);
