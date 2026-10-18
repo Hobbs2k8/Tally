@@ -1,4 +1,4 @@
-# DealRoom
+# Tally
 
 > **New: QuickBooks Command Center** lives in [`command-center/`](command-center/README.md): a Next.js app that turns a plain-English financial decision into one evidence-backed action plan (Gemini routing + a deterministic engine, Sentry tracing). `cd command-center && npm install && npm run dev`.
 
