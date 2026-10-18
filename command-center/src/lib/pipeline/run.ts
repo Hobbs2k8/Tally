@@ -421,7 +421,9 @@ function bottomLineDraft(
   const overdue = r.findings?.find((f) => f.id === "overdue-total");
 
   if (r.sim && r.assumptions && (r.sim.search || task.stress.requested)) {
-    const h = simulationHeadline(r.sim, r.assumptions, overdue?.amount ?? null);
+    // Overdue total from the books even when no investigation ran (it is part of the plan's first step).
+    const overdueAmount = overdue?.amount ?? agingBuckets(openReceivables(data)).overdue;
+    const h = simulationHeadline(r.sim, r.assumptions, overdueAmount || null);
     parts.push(...h.parts);
     facts.push(...h.facts);
   } else if (r.answer) {

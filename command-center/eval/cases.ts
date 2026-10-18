@@ -6,7 +6,7 @@
 // written before the first eval run and are never used to change the rules.
 import type { Capability, Task } from "../src/lib/pipeline/task";
 
-export type Tag = "ambiguous" | "missing_data" | "conflicting" | "delayed_payments" | "interacting" | "question" | "counterfactual" | "terms" | "simple";
+export type Tag = "paraphrase" | "ambiguous" | "missing_data" | "conflicting" | "delayed_payments" | "interacting" | "question" | "counterfactual" | "terms" | "simple";
 
 export interface Expect {
   /** Expected company id, or "clarify" when the request should trigger a question. Only checked when companyId is null. */
@@ -275,6 +275,50 @@ export const CASES: EvalCase[] = [
     prompt: "Can I afford a new hire?",
     tags: ["ambiguous", "missing_data"],
     expect: { company: "clarify" },
+  },
+
+  // ---------- paraphrase holdout ----------
+  // Written after the System One stand-in was built and before these were ever run;
+  // never used to change rules or thresholds. Wording deliberately avoids the parser's keywords.
+  {
+    id: "pp-barista",
+    split: "holdout",
+    companyId: "company-073",
+    prompt: "Can I afford to bring on a new barista?",
+    tags: ["paraphrase", "missing_data"],
+    expect: { decisionType: "hiring", hireCount: 1, capabilities: ["flight_simulator"] },
+  },
+  {
+    id: "pp-ads",
+    split: "holdout",
+    companyId: "company-021",
+    prompt: "Is it worth putting more money into ads this quarter?",
+    tags: ["paraphrase"],
+    expect: { marketingIncreaseRequested: true, capabilities: ["flight_simulator"] },
+  },
+  {
+    id: "pp-billed-twice",
+    split: "holdout",
+    companyId: "company-001",
+    prompt: "Did anyone bill me twice recently?",
+    tags: ["paraphrase"],
+    expect: { decisionType: "anomaly_check", capabilities: ["money_detective"], notCapabilities: ["flight_simulator"] },
+  },
+  {
+    id: "pp-money-left",
+    split: "holdout",
+    companyId: "company-087",
+    prompt: "If nothing changes, when does the money run dry?",
+    tags: ["paraphrase", "question"],
+    expect: { questionKind: "runway", capabilities: ["future_accountant"] },
+  },
+  {
+    id: "pp-month-later",
+    split: "holdout",
+    companyId: "company-024",
+    prompt: "How would we cope if clients started settling their invoices a month later than usual?",
+    tags: ["paraphrase", "delayed_payments"],
+    expect: { stressRequested: true, capabilities: ["chaos_simulator"] },
   },
 ];
 

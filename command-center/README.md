@@ -69,9 +69,9 @@ request ─▶ intent (Gemini structured output → Zod; retry once; else regex 
 |---|---|
 | `DeterministicProvider` (`src/lib/providers/deterministic.ts`) | **Real, and the default when no key is set.** Regex intent parser and token-overlap company matching. Also the eval baseline |
 | `GeminiProvider` (`src/lib/providers/gemini.ts`) | **Real, used automatically when `GEMINI_API_KEY` is set.** Picks the newest stable Flash model available to the key at runtime (no hardcoded model id) unless `GEMINI_MODEL` is set. On 2026-10-18 the key resolved to `gemini-3.8-flash`. **Verified live** on the hero question: Gemini returned a schema-valid task, and its wording passed the number-grounding check (about 6 s per request, from two model calls of roughly 2.5–3.7 s each). The live runs also exercised the two safety nets: one rewording was rejected because it cited numbers not in the facts, and quota (429) errors fell back to the rules in about 200 ms. Also unit-tested with a fake client (validation, retry, fallback, auth errors, invented ids, ungrounded numbers). |
-| `SystemOneProvider` (`src/lib/providers/systemone.ts`) | **Stub.** It delegates to the deterministic rules and reports `fellBack: true`, so nothing is ever labeled as System One output. The file documents the exact interface. Wiring in System One / TypeSafe Jev is a one-file change plus `REASONING_PROVIDER=systemone` |
+| `SystemOneProvider` (`src/lib/providers/systemone.ts`) | **Real provider, two transports.** System One answers choice and yes/no questions with probabilities. The provider asks it what kind of request this is and which flags apply (hire, draw, stress, investigate, …), and which company the owner means when the rules tie. Numbers still come from the rules, and the bottom line stays the engine's template. **With `TYPESAFE_API_KEY`** it calls TypeSafe's `POST /v1/systemone` (`jev-latest`), built to the official SDK contract and tested against a mocked endpoint. **Not run live: we have no key.** **Without a key** it uses a **local stand-in**: the open-source zero-shot NLI model `Xenova/nli-deberta-v3-xsmall` (MIT), run in-process by Transformers.js. It needs no key, makes no network calls after a one-time ~90 MB download, and takes about 140 ms per request. The UI labels it "System One stand-in", never System One. Select with `REASONING_PROVIDER=systemone`. |
 
-We make no System One performance claims.
+We make no claims about the real System One's performance. The stand-in's numbers are its own (see Evaluation).
 
 ## Observability (Sentry)
 
@@ -87,7 +87,7 @@ No Sentry DSN was configured while we built this. Those findings come from the s
 
 `npm run eval` runs 28 known-answer cases (12 holdout) across 16 companies in 15 industries and all 7 business shapes. Tags include ambiguous prompts, missing data, conflicting constraints, delayed payments, and interacting decisions. Numbers are checked against the dataset's own reports. Anomaly detection is measured on planted copies. Full results, failures and iteration history are in `docs/EVAL_RESULTS.md`.
 
-Current results, deterministic system (the only one measured so far):
+Current results for the deterministic system and the local System One stand-in:
 
 | Metric | Result |
 |---|---|
@@ -97,7 +97,7 @@ Current results, deterministic system (the only one measured so far):
 | Planted anomalies caught | 12/12 |
 | p50 latency | under 10 ms |
 
-There are still false positives on clean data (19 of 100 companies flagged). **The plain-LLM and Gemini + engine columns are still "not measured".** The available key is on Gemini's free tier, which allows 20 requests per model per day, and a full run needs about 100 calls. With a billed key, `npm run eval` paces its calls and waits out per-minute 429s automatically. It gives up on daily-quota errors instead of sleeping for hours.
+There are still false positives on clean data (19 of 100 companies flagged). On 5 paraphrase holdout cases worded to avoid the parser's keywords, the rules get 1 of 5 intents right and the System One stand-in gets 3 of 5. **The plain-LLM and Gemini + engine columns are still "not measured".** The available key is on Gemini's free tier, which allows 20 requests per model per day, and a full run needs about 100 calls. With a billed key, `npm run eval` paces its calls and waits out per-minute 429s automatically. It gives up on daily-quota errors instead of sleeping for hours.
 
 ## Chat agent on Agentverse (ASI:One)
 

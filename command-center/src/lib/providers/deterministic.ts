@@ -153,20 +153,7 @@ export function parseTask(request: string): Task {
   // Decision type
   const dd = t.decisions;
   const nDecisions = [dd.hireCount, dd.marketingIncreaseRequested || null, dd.ownerDrawRequested || null, dd.priceChangePct, dd.equipmentAmount].filter(Boolean).length;
-  if (nDecisions >= 2) t.decisionType = "growth_plan";
-  else if (dd.hireCount) t.decisionType = "hiring";
-  else if (dd.marketingIncreaseRequested) t.decisionType = "marketing";
-  else if (dd.ownerDrawRequested) t.decisionType = "owner_draw";
-  else if (dd.priceChangePct) t.decisionType = "pricing";
-  else if (dd.equipmentAmount !== null || /equipment/.test(s)) t.decisionType = "equipment";
-  else if (dd.vendorTermsExtraDays || dd.earlyPayDiscountPct || /payment terms|terms/.test(s)) t.decisionType = "payment_terms";
-  else if (t.counterfactual) t.decisionType = "counterfactual";
-  else if (t.wantsAnomalies) t.decisionType = "anomaly_check";
-  else if (t.stress.requested) t.decisionType = "stress_test";
-  else if (t.questionKind === "profit_vs_cash" || t.questionKind === "margin" || t.wantsProfitLeaks) t.decisionType = "profit_question";
-  else if (t.questionKind === "top_debtors") t.decisionType = "receivables_question";
-  else if (t.questionKind === "top_expenses") t.decisionType = "expense_question";
-  else if (t.questionKind === "cash_position" || t.questionKind === "runway" || t.questionKind === "revenue_trend") t.decisionType = "cash_question";
+  t.decisionType = decisionTypeFor(t, s);
 
   // Missing info
   if (dd.hireCount && dd.hireAnnualSalary === null) t.missingInfo.push("salary for the new hires");
@@ -178,6 +165,27 @@ export function parseTask(request: string): Task {
   t.requiredRecords = requiredRecordsFor(t);
   if (nDecisions || t.stress.requested) t.desiredComparisons.push("current plan vs proposal vs recommended plan");
   return t;
+}
+
+/** Decision type implied by a task's extracted fields (s = lowercased request text). */
+export function decisionTypeFor(t: Task, s: string): Task["decisionType"] {
+  const dd = t.decisions;
+  const n = [dd.hireCount, dd.marketingIncreaseRequested || null, dd.ownerDrawRequested || null, dd.priceChangePct, dd.equipmentAmount].filter(Boolean).length;
+  if (n >= 2) return "growth_plan";
+  if (dd.hireCount) return "hiring";
+  if (dd.marketingIncreaseRequested) return "marketing";
+  if (dd.ownerDrawRequested) return "owner_draw";
+  if (dd.priceChangePct) return "pricing";
+  if (dd.equipmentAmount !== null || /equipment/.test(s)) return "equipment";
+  if (dd.vendorTermsExtraDays || dd.earlyPayDiscountPct || /payment terms|terms/.test(s)) return "payment_terms";
+  if (t.counterfactual) return "counterfactual";
+  if (t.wantsAnomalies) return "anomaly_check";
+  if (t.stress.requested) return "stress_test";
+  if (t.questionKind === "profit_vs_cash" || t.questionKind === "margin" || t.wantsProfitLeaks) return "profit_question";
+  if (t.questionKind === "top_debtors") return "receivables_question";
+  if (t.questionKind === "top_expenses") return "expense_question";
+  if (t.questionKind === "cash_position" || t.questionKind === "runway" || t.questionKind === "revenue_trend") return "cash_question";
+  return "general_question";
 }
 
 /** Record types a task needs (also used to check Gemini's answer for completeness). */

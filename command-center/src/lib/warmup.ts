@@ -7,6 +7,7 @@ import { DEMO_COMPANY_ID, HERO_QUESTION } from "./demo";
 import { log } from "./observability";
 import { DeterministicProvider } from "./providers/deterministic";
 import { runPipeline } from "./pipeline/run";
+import { getProvider } from "./providers";
 
 let warmed: Promise<void> | null = null;
 
@@ -20,6 +21,9 @@ async function doWarm(): Promise<void> {
   try {
     // Deterministic provider: warming must not spend model tokens.
     await runPipeline(HERO_QUESTION, { companyId: DEMO_COMPANY_ID, provider: new DeterministicProvider(), templateOnly: true });
+    // Load the local stand-in model (if that provider is active) so the first request does not wait for it.
+    const p = getProvider() as { preload?: () => Promise<void> };
+    if (p.preload) await p.preload();
     log("info", "engine warmed", { ms: Math.round(performance.now() - t0) });
   } catch (e) {
     log("warn", "warmup failed", { error: e instanceof Error ? e.message : String(e) });

@@ -19,6 +19,9 @@ const { loadCompany } = await import("../src/lib/data/load");
 const { runPipeline, clearCaches } = await import("../src/lib/pipeline/run");
 const { DeterministicProvider } = await import("../src/lib/providers/deterministic");
 const { GeminiProvider, sdkClient } = await import("../src/lib/providers/gemini");
+const { SystemOneProvider } = await import("../src/lib/providers/systemone");
+const { localTransport } = await import("../src/lib/providers/systemone-api/local");
+const { httpTransport } = await import("../src/lib/providers/systemone-api/http");
 const { investigate } = await import("../src/lib/engine/detective");
 const { buildInputs } = await import("../src/lib/engine/baseline");
 const { project } = await import("../src/lib/engine/projection");
@@ -285,6 +288,17 @@ const systems: Record<string, CaseResult[]> = {};
 // Warm the JIT once so latency reflects a running server, not the first-call compile.
 await runPipeline(CASES[0].prompt, { companyId: CASES[0].companyId, provider: new DeterministicProvider() });
 systems["deterministic"] = await runSystem("deterministic", new DeterministicProvider());
+
+// System One: the local open-source stand-in always; the real TypeSafe API when a key exists.
+const standin = new SystemOneProvider(localTransport());
+await standin.preload(); // model load is a one-time cost, not per-request latency
+await runPipeline(CASES[0].prompt, { companyId: CASES[0].companyId, provider: standin });
+systems["systemone-standin"] = await runSystem("systemone-standin", standin);
+if (process.env.TYPESAFE_API_KEY) {
+  systems["systemone"] = await runSystem("systemone", new SystemOneProvider(httpTransport(process.env.TYPESAFE_API_KEY)));
+} else {
+  console.log("TYPESAFE_API_KEY not set: real System One is not measured.");
+}
 
 let gemini: InstanceType<typeof GeminiProvider> | null = null;
 let evalClient: ReturnType<typeof sdkClient> | null = null;

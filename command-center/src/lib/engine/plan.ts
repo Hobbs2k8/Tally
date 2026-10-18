@@ -221,7 +221,7 @@ export function shortChanges(levers: Levers, req: DecisionRequest, fmt: (c: numb
   if (n > 0) {
     const total = levers.hires.reduce((s, h) => s + h.count, 0);
     if (!total) out.push("hold off on hiring");
-    else if (levers.hires.length === 1 && total === n && levers.hires[0].startWeek > 0) out.push(`${n === 2 ? "hire both" : `hire all ${n}`} in week ${levers.hires[0].startWeek + 1}`);
+    else if (levers.hires.length === 1 && total === n && levers.hires[0].startWeek > 0) out.push(`${n === 1 ? "make the hire" : n === 2 ? "hire both" : `hire all ${n}`} in week ${levers.hires[0].startWeek + 1}`);
     else if (levers.hires.length > 1) out.push(`stagger hires (${levers.hires.map((h) => `${h.count} ${h.startWeek ? `in week ${h.startWeek + 1}` : "now"}`).join(", ")})`);
     else if (total < n) out.push(`hire ${total} of ${n}${levers.hires[0].startWeek ? ` in week ${levers.hires[0].startWeek + 1}` : " now"}`);
   }

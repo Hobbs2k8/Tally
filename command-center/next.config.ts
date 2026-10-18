@@ -4,6 +4,8 @@ import { withSentryConfig } from "@sentry/nextjs/config";
 const nextConfig: NextConfig = {
   // Compiled company data is read from disk at runtime by the API routes.
   outputFileTracingIncludes: { "/api/**": ["./data/compiled/**"] },
+  // Native ONNX runtime for the local System One stand-in: load from node_modules, do not bundle.
+  serverExternalPackages: ["@huggingface/transformers", "onnxruntime-node"],
 };
 
 // Source-map upload only runs when SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT are set.
