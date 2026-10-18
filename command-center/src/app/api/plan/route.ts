@@ -7,10 +7,19 @@ import { warm } from "@/lib/warmup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Hosted deployments: give the pipeline (two Gemini calls on a cold start) room to finish.
+export const maxDuration = 60;
 
 const Body = z.object({ request: z.string().min(3).max(2000), companyId: z.string().max(40).nullable().optional() });
 
 export async function POST(req: Request) {
+  // When COMMAND_CENTER_API_KEY is set (public deployments), server-to-server
+  // callers (the Agentverse agent) must present it; the app's own browser UI is
+  // let through by the same-origin fetch metadata. Unset = open, as before.
+  const apiKey = process.env.COMMAND_CENTER_API_KEY;
+  if (apiKey && req.headers.get("x-api-key") !== apiKey && req.headers.get("sec-fetch-site") !== "same-origin") {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Expected { request: string, companyId?: string }" }, { status: 400 });
   const { request, companyId } = parsed.data;

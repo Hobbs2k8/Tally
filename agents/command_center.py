@@ -34,15 +34,19 @@ from uagents_core.contrib.protocols.chat import (
 )
 
 API_URL = os.environ.get("COMMAND_CENTER_URL", "http://localhost:3000").rstrip("/")
+# Needed when the deployment sets COMMAND_CENTER_API_KEY on POST /api/plan.
+API_KEY = os.environ.get("COMMAND_CENTER_API_KEY", "")
 DEFAULT_COMPANY = os.environ.get("COMMAND_CENTER_COMPANY", "company-002")
 PORT = int(os.environ.get("COMMAND_CENTER_PORT", "8002"))
 TIMEOUT = float(os.environ.get("COMMAND_CENTER_TIMEOUT", "120"))
 # Off only in the local test, which runs without Agentverse.
 ONLINE = os.environ.get("COMMAND_CENTER_MAILBOX", "1") != "0"
 
+SEED = require_seed("COMMAND_CENTER_SEED")
+
 agent = Agent(
     name="quickbooks-command-center",
-    seed=require_seed("COMMAND_CENTER_SEED"),
+    seed=SEED,
     port=PORT,
     mailbox=ONLINE,   # reachable from ASI:One through Agentverse
     description="QuickBooks Command Center: a small-business finance agent. Ask a plain-English question "
@@ -130,7 +134,8 @@ def format_result(result: dict) -> str:
 # ---- API calls ---------------------------------------------------------------
 def _post_plan(request: str, company_id: str) -> dict:
     body = json.dumps({"request": request, "companyId": company_id}).encode()
-    req = urllib.request.Request(f"{API_URL}/api/plan", data=body, headers={"content-type": "application/json"})
+    headers = {"content-type": "application/json", **({"x-api-key": API_KEY} if API_KEY else {})}
+    req = urllib.request.Request(f"{API_URL}/api/plan", data=body, headers=headers)
     last = None
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         for raw in resp:
@@ -224,7 +229,37 @@ async def on_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
 agent.include(chat_proto, publish_manifest=ONLINE)
 
 
+def register_with_agentverse():
+    """Agentverse 'Connect an agent' flow: with AGENTVERSE_KEY set (an API key from
+    agentverse.ai), list this agent under your Agentverse account so it shows up in
+    your dashboard and ASI:One without the manual inspector Connect step. Optional;
+    the agent runs fine without it."""
+    key = os.environ.get("AGENTVERSE_KEY", "").strip()
+    if not key:
+        return
+    from uagents_core.utils.registration import (
+        RegistrationRequestCredentials,
+        register_chat_agent,
+    )
+    name = os.environ.get("AGENTVERSE_AGENT_NAME", "Command-Center")
+    handle = os.environ.get("AGENTVERSE_HANDLE", "odumosu")
+    try:
+        register_chat_agent(
+            name,
+            handle,
+            active=True,
+            credentials=RegistrationRequestCredentials(
+                agentverse_api_key=key,
+                agent_seed_phrase=SEED,
+            ),
+        )
+        print(f"Registered with Agentverse as {handle}/{name}")
+    except Exception as e:
+        print(f"Agentverse registration failed ({e}); continuing without it.")
+
+
 if __name__ == "__main__":
+    register_with_agentverse()
     print(f"command center agent {agent.address}  (API {API_URL}, default {DEFAULT_COMPANY})")
     inspector = (f"https://agentverse.ai/inspect/?uri={quote(f'http://127.0.0.1:{PORT}', safe='')}"
                  f"&address={agent.address}")

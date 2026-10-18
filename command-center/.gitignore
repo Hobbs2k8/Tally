@@ -9,3 +9,6 @@ next-env.d.ts
 eval/out/
 .sentryclirc
 .cache/
+
+.vercel
+.env*
