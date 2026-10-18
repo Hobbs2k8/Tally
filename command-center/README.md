@@ -99,6 +99,24 @@ Current results, deterministic system (the only one measured so far):
 
 There are still false positives on clean data (19 of 100 companies flagged). **The plain-LLM and Gemini + engine columns say "not measured" until the eval is run with a key.**
 
+## Chat agent on Agentverse (ASI:One)
+
+`agents/command_center.py` in the DealRoom repo root runs the Command Center as a Fetch.ai uAgent that speaks the Agent Chat Protocol, so an owner can ask it questions from ASI:One. It uses the same Python setup as the DealRoom buyer agent (uagents 0.26.1, no new dependencies). Each chat message becomes `POST /api/plan`; the reply is plain text: the bottom line, the top 3 actions and, for each scenario, lowest cash, ending cash and the stress-test low. `company <id or name>` switches company (`company 3`, `company roastline`; default company-002), `companies` lists them.
+
+```bash
+# terminal 1
+cd command-center && npm run dev
+# terminal 2, from the DealRoom repo root (python -m venv .venv && .venv/bin/pip install -r requirements.txt if not done)
+echo 'COMMAND_CENTER_SEED=<any long random string>' >> .env     # once; keep it stable, the agent address comes from it
+.venv/bin/python -m agents.command_center
+```
+
+One time: the agent prints an Agentverse inspector link. Open it, click **Connect**, choose **Mailbox**. After that, find `quickbooks-command-center` in ASI:One or chat with it from its Agentverse page. The mailbox only stays live while the agent and `npm run dev` are running on your machine.
+
+Local test without Agentverse (needs `npm run dev`): `.venv/bin/python -m scripts.command_center_test`. It checks the reply formatter and company lookup against the live API, then runs the agent and a fake owner agent in one local Bureau and chats through the protocol (help, switch company, two questions, an unknown company).
+
+Optional settings: `COMMAND_CENTER_URL` (default `http://localhost:3000`), `COMMAND_CENTER_COMPANY` (default `company-002`), `COMMAND_CENTER_PORT` (default 8002; the DealRoom Bureau uses 8000).
+
 ## Dataset changes
 
 None in the app. See `docs/SYNTHETIC_CHANGES.md`: the eval plants two anomalies in in-memory copies of six companies, and everything else is derived and reconciled. `docs/DATA_MAP.md` covers every table, the joins, what each capability can and cannot do with this data, and why Roastline Coffee Roasters (company-002) is the demo company.
