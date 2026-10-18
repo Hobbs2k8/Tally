@@ -1,5 +1,8 @@
 # DealRoom
 
+> **New: QuickBooks Command Center** lives in [`command-center/`](command-center/README.md): a Next.js app that turns a plain-English financial decision into one evidence-backed action plan (Gemini routing + a deterministic engine, Sentry tracing). `cd command-center && npm install && npm run dev`.
+
+
 A negotiating purchasing agent for small businesses. LA Hacks AI Hackathon 2026: Intuit QuickBooks (System One models) track and Fetch.ai ASI:One Agent Challenge.
 
 A **buyer agent** reads a small business's QuickBooks accounts-payable data, finds a bill worth negotiating (price creep, a reliable payment history, a bill due near payroll), asks the owner in ASI:One whether to negotiate, haggles with a **supplier agent**, and asks the owner to approve the final deal. Nothing is agreed without owner approval.

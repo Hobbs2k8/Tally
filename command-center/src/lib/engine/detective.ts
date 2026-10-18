@@ -60,7 +60,7 @@ export function overdueFindings(data: CompanyData, asOf = data.asOfDay): Finding
     const amt = unusual.reduce((s, u) => s + u.amount, 0);
     const top = unusual.slice(0, 3).map((u) => `${u.name} (${u.days} days vs usual ${u.usual})`).join(", ");
     out.push({
-      id: "unusual-delays",
+      id: "late-customers",
       capability: "detective",
       status: "hypothesis",
       severity: unusual.some((u) => u.days > 60) ? "high" : "medium",
@@ -97,36 +97,47 @@ export function writeOffFindings(data: CompanyData, asOf = data.asOfDay): Findin
   ];
 }
 
-/** Same vendor, same amount, within 3 days, outside the vendor's normal cadence. */
+/**
+ * Same vendor, same category, same amount, at most 3 days apart, and either
+ * much sooner than this vendor normally bills (gap < half the median interval)
+ * or an amount this vendor rarely repeats. Installment series (identical bills
+ * every day or two) and normal cadences (weekly rent) are not flagged.
+ * Job-costed bills are compared only within their project, and must also be a
+ * rare amount (project installments repeat by design).
+ */
 export function duplicateFindings(data: CompanyData, asOf = data.asOfDay): Finding[] {
   const vendors = new Map(data.vendors.map((v) => [v.id, v.name]));
   const bills = data.bills.filter((b) => b.day <= asOf).sort((a, b) => a.day - b.day);
   const out: Finding[] = [];
-  const seen = new Set<string>();
-  const byVendor = new Map<string, typeof bills>();
+  const groups = new Map<string, typeof bills>();
   for (const b of bills) {
-    if (!byVendor.has(b.vendorId)) byVendor.set(b.vendorId, []);
-    byVendor.get(b.vendorId)!.push(b);
+    const k = `${b.vendorId}|${b.category}|${b.projectId ?? ""}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(b);
   }
-  for (const [vid, list] of byVendor) {
+  for (const [, list] of groups) {
+    const jobCosted = Boolean(list[0].projectId);
+    const gaps = list.slice(1).map((b, i) => b.day - list[i].day).filter((g) => g > 0);
+    const medianGap = gaps.length ? median(gaps) : Infinity;
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length && list[j].day - list[i].day <= 3; j++) {
         const a = list[i];
         const b = list[j];
-        if (a.total !== b.total || a.category !== b.category || a.total < 10_000) continue;
-        // Daily or near-daily identical bills are a pattern (e.g. subcontract installments), not a duplicate.
-        const sameAmountNearby = list.filter((x) => x.total === a.total && Math.abs(x.day - a.day) <= 30).length;
-        if (sameAmountNearby > 3) continue;
-        const key = [a.id, b.id].sort().join("|");
-        if (seen.has(key)) continue;
-        seen.add(key);
+        if (a.total !== b.total || a.total < 10_000) continue;
+        const gap = b.day - a.day;
+        // "Same amount" within 1%: installment series split a contract into near-identical bills.
+        const sameAmountNearby = list.filter((x) => Math.abs(x.total - a.total) <= a.total * 0.01 && Math.abs(x.day - a.day) <= 30).length;
+        const offCadence = gap < medianGap * 0.5;
+        const rareAmount = sameAmountNearby <= 2;
+        if (jobCosted ? !rareAmount : !offCadence && !rareAmount) continue;
+        const vid = a.vendorId;
         out.push({
           id: `dup-${a.id}-${b.id}`,
           capability: "detective",
           status: "hypothesis",
           severity: a.total > 100_000 ? "high" : "medium",
           title: `Possible duplicate bill from ${vendors.get(vid) ?? vid}`,
-          detail: `Two ${a.category.replace(/_/g, " ")} bills of ${usd(a.total)} ${b.day === a.day ? "on the same day" : `${b.day - a.day} day(s) apart`}. Confirm both are genuine before paying.`,
+          detail: `Two ${a.category.replace(/_/g, " ")} bills of ${usd(a.total)} ${gap === 0 ? "on the same day" : `${gap} day(s) apart`}${Number.isFinite(medianGap) ? `; this vendor usually bills every ${Math.round(medianGap)} day(s)` : ""}. Confirm both are genuine before paying.`,
           amount: a.total,
           sources: [a, b].map((x) => ({ id: x.id, label: `${vendors.get(vid) ?? vid} · ${x.memo || x.category}`, amount: x.total, date: dayToDate(data.openingDate, x.day) })),
         });
@@ -142,13 +153,13 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-/** Bills far outside the vendor/category's usual amount (robust z-score). */
+/** Bills far outside the vendor/category's usual amount (robust z-score). Job-costed bills compare within their project. */
 export function unusualExpenseFindings(data: CompanyData, asOf = data.asOfDay): Finding[] {
   const vendors = new Map(data.vendors.map((v) => [v.id, v.name]));
   const groups = new Map<string, typeof data.bills>();
   for (const b of data.bills) {
     if (b.day > asOf || b.category === "income_tax") continue;
-    const k = `${b.vendorId}|${b.category}`;
+    const k = `${b.vendorId}|${b.category}|${b.projectId ?? ""}`;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k)!.push(b);
   }
