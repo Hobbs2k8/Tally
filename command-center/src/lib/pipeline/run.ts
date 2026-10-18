@@ -22,7 +22,7 @@ import { onTimePaymentCounterfactual } from "../engine/timemachine";
 import type { Emit } from "../observability";
 import { log, stage } from "../observability";
 import { requiredRecordsFor } from "../providers/deterministic";
-import { shortChanges } from "../engine/plan";
+import { lowerFirst, simulationHeadline } from "./headline";
 import { getProvider } from "../providers";
 import type { ReasoningProvider, Usage } from "../providers/types";
 import { addUsage, NO_USAGE, toCandidate } from "../providers/types";
@@ -251,14 +251,19 @@ function mergeRecords(t: Task): Task["requiredRecords"] {
 
 function matchCustomer(data: CompanyData, name: string | null): string | null {
   if (!name) return null;
-  const toks = name.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["inc", "llc", "the", "and", "co"].includes(w));
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  const exact = data.customers.find((c) => norm(c.name) === norm(name));
+  if (exact) return exact.id;
+  const toks = norm(name).split(" ").filter((w) => w.length > 1 && !["the", "and", "co"].includes(w));
   let best: { id: string; score: number } | null = null;
   for (const c of data.customers) {
-    const cn = c.name.toLowerCase();
-    const score = toks.filter((t) => cn.includes(t)).length / Math.max(1, toks.length);
+    const ct = norm(c.name).split(" ");
+    const hits = toks.filter((t) => ct.includes(t)).length;
+    // Share of the query matched, then share of the customer name matched (prefers the closest name).
+    const score = hits / Math.max(1, toks.length) + (0.5 * hits) / Math.max(1, ct.length);
     if (score > (best?.score ?? 0)) best = { id: c.id, score };
   }
-  return best && best.score >= 0.5 ? best.id : null;
+  return best && best.score >= 0.6 ? best.id : null;
 }
 
 export function buildAssumptions(task: Task, data: CompanyData, inputs: ProjectionInputs): Assumption[] {
@@ -417,40 +422,10 @@ function bottomLineDraft(
   const parts: string[] = [];
   const overdue = r.findings?.find((f) => f.id === "overdue-total");
 
-  if (r.sim && r.assumptions) {
-    const a = (id: string) => r.assumptions!.find((x) => x.id === id)?.value ?? 0;
-    const reserve = fact("reserve", usd(a("reserve")));
-    const delay = fact("stress delay days", `${a("stressDelayDays")} days`);
-    const P = r.sim.projections;
-    const S = r.sim.stressedProjections;
-    const F = r.sim.feasible;
-    const rec = P.recommended;
-    const prop = P.proposed;
-    if (prop && rec && r.sim.search) {
-      const spec = specFromAssumptions(r.assumptions, true);
-      const recLevers = r.sim.scenarios.find((x) => x.id === "recommended")!.levers;
-      const short = shortChanges(recLevers, spec.request, usd).map((c) =>
-        c === "chase overdue invoices first" && overdue ? `chase the ${fact("overdue", usd(overdue.amount ?? 0))} of overdue invoices` : c,
-      );
-      if (F.proposed) {
-        parts.push(`Your plan holds up: doing everything now keeps cash above the ${reserve} reserve (low ${fact("proposal base min", usd(prop.summary.minCash))}) and above zero even if customers pay ${delay} late (low ${fact("proposal stress min", usd(S.proposed.summary.minCash))}).`);
-        if (short.length) parts.push(`To add headroom: ${joinList(short)}.`);
-      } else if (F.recommended) {
-        const problem = S.proposed.summary.minCash < 0
-          ? `runs out of cash if customers pay ${delay} late (low ${fact("proposal stress min", usd(S.proposed.summary.minCash))})`
-          : `drops below your ${reserve} reserve (low ${fact("proposal base min", usd(prop.summary.minCash))})`;
-        parts.push(`Don't do it all at once: doing everything now ${problem}.`);
-        parts.push(`Safest plan: ${joinList(short)}. Cash then stays above ${reserve} (low ${fact("recommended base min", usd(rec.summary.minCash))}) and above zero even with a ${a("stressDelayDays")}-day slip (low ${fact("recommended stress min", usd(S.recommended.summary.minCash))}).`);
-      } else {
-        parts.push(`No version of this plan is safe yet: even the most cautious one falls to ${fact("recommended stress min", usd(S.recommended.summary.minCash))} if customers pay ${delay} late.`);
-        if (overdue) parts.push(`Fix collections first: ${fact("overdue", usd(overdue.amount ?? 0))} is overdue.`);
-      }
-    } else if (P.current) {
-      const s = S.current.summary;
-      parts.push(`If customers pay ${delay} late, cash bottoms out at ${fact("stress min", usd(s.minCash))} in week ${s.minWeek + 1}${s.firstBreachWeek !== null ? `, below your ${reserve} reserve from week ${s.firstBreachWeek + 1}` : `, still above your ${reserve} reserve`}.`);
-      const bp = r.sim.stress?.breakingPoints.find((b) => b.axis === "paymentDelayDays");
-      if (bp?.breaksZeroAt !== null && bp?.breaksZeroAt !== undefined) parts.push(`Cash would run out at about ${fact("delay to zero", `${bp.breaksZeroAt} days`)} of delay.`);
-    }
+  if (r.sim && r.assumptions && (r.sim.search || task.stress.requested)) {
+    const h = simulationHeadline(r.sim, r.assumptions, overdue?.amount ?? null);
+    parts.push(...h.parts);
+    facts.push(...h.facts);
   } else if (r.answer) {
     parts.push(r.answer.headline);
     for (const f of r.answer.facts) fact(f.label, f.unit === "usd" ? usd(f.value) : `${f.value}`);
@@ -458,8 +433,9 @@ function bottomLineDraft(
     const cf = r.counterfactual;
     parts.push(`Had ${cf.customerName} paid every invoice on its due date, your lowest cash point this year would have been ${fact("cf min", usd(cf.counterfactualMin.cash))} instead of ${fact("hist min", usd(cf.historicalMin.cash))} (${fact("payments moved", `${cf.paymentsMoved}`)} late payments, ${fact("amount moved", usd(cf.amountMoved))}, about ${fact("days earlier", `${cf.avgDaysEarlier.toFixed(0)}`)} days earlier on average).`);
   } else if (r.negotiation) {
-    const best = [...r.negotiation].sort((a, b) => b.minCashDelta - a.minCashDelta)[0];
-    parts.push(`Best for cash: ${lowerFirst(best.title)} (${fact("best min cash delta", usd(best.minCashDelta, { sign: true }))} at the low point over 90 days). ${best.behaviorAssumption}`);
+    const best = [...r.negotiation].sort((a, b) => b.minCashDelta - a.minCashDelta || b.endingCashDelta - a.endingCashDelta)[0];
+    const low = best.minCashDelta !== 0 ? `${fact("best min cash delta", usd(best.minCashDelta, { sign: true }))} at the low point, ` : "";
+    parts.push(`Best for cash: ${lowerFirst(best.title)} (${low}${fact("best ending cash delta", usd(best.endingCashDelta, { sign: true }))} by the end of 13 weeks, operating profit ${fact("best profit delta", usd(best.operatingProfitDelta, { sign: true }))}). ${best.behaviorAssumption}`);
   } else if (r.findings?.length) {
     parts.push(`Top issue: ${lowerFirst(r.findings[0].title)}.`);
   }
@@ -469,18 +445,8 @@ function bottomLineDraft(
   for (const f of r.findings ?? []) if (f.amount) fact(f.title, usd(f.amount));
   fact("cash", usd(inputs.openingCash));
   fact("weekly payroll", usd(inputs.weeklyPayroll));
-  void task;
   void data;
   return { draft: parts.join(" ") || `Here is what the books show for ${data.name}.`, facts };
-}
-
-function joinList(xs: string[]): string {
-  if (xs.length <= 1) return xs.join("");
-  return `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
-}
-
-function lowerFirst(s: string): string {
-  return s ? s[0].toLowerCase() + s.slice(1) : s;
 }
 
 function validate(data: CompanyData, inputs: ProjectionInputs, sim: SimulationResult | null, assumptions: Assumption[] | null): ValidationCheck[] {

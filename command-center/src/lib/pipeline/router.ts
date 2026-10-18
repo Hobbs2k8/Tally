@@ -14,8 +14,11 @@ export function route(task: Task): Route {
   const decision = hasDecision(task);
   const d = task.decisions;
 
+  const spendDecision = Boolean((d.hireCount ?? 0) > 0 || d.marketingIncreaseRequested || d.ownerDrawRequested || d.priceChangePct || d.equipmentAmount);
+  if (spendDecision) {
+    caps.set("flight_simulator", "the request changes future cash (hiring, spending, draws or prices)");
+  }
   if (decision) {
-    caps.set("flight_simulator", "the request changes future cash (hiring, spending, draws, prices or terms)");
     caps.set("autopilot", "decisions turn into an ordered action list");
   }
   if (task.stress.requested) {

@@ -214,8 +214,14 @@ export function requiredRecordsFor(t: Task): Task["requiredRecords"] {
 
 const STOP = new Set(["the", "and", "co", "co.", "inc", "inc.", "llc", "company", "group", "&", "of", "supply", "services", "my", "for", "a", "an"]);
 
+function stem(w: string): string {
+  if (w.endsWith("ies") && w.length > 4) return w.slice(0, -3) + "y";
+  if (w.endsWith("s") && !w.endsWith("ss") && w.length > 3) return w.slice(0, -1);
+  return w;
+}
+
 function tokens(s: string): string[] {
-  return s.toLowerCase().split(/[^a-z0-9&']+/).filter((w) => w.length > 2 && !STOP.has(w));
+  return s.toLowerCase().split(/[^a-z0-9&']+/).filter((w) => w.length > 2 && !STOP.has(w)).map(stem);
 }
 
 /** Token overlap between the request and each company's name and industry. */
@@ -223,8 +229,8 @@ export function rankByOverlap(request: string, candidates: CompanyCandidate[]): 
   const req = new Set(tokens(request));
   return candidates
     .map((c) => {
-      const nameHits = tokens(c.name).filter((w) => req.has(w) || req.has(w.replace(/s$/, "")) || req.has(w + "s"));
-      const indHits = tokens(c.industry).filter((w) => req.has(w) || req.has(w.replace(/s$/, "")));
+      const nameHits = [...new Set(tokens(c.name))].filter((w) => req.has(w));
+      const indHits = [...new Set(tokens(c.industry))].filter((w) => req.has(w) && !nameHits.includes(w));
       const score = Math.min(1, nameHits.length * 0.45 + indHits.length * 0.15);
       return { id: c.id, score, reason: nameHits.length ? `name matches "${nameHits.join(" ")}"` : indHits.length ? `industry matches "${indHits.join(" ")}"` : "no match" };
     })

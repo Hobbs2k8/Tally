@@ -22,7 +22,7 @@ export interface SimulationResult {
     delaySweep: { delay: number; minCash: Record<string, number> }[];
   } | null;
   computeMs: number;
-  recomputed: string[]; // scenario ids actually recomputed (others reused from cache)
+  recomputed: string[]; // "base:<id>" / "stress:<id>" projections actually recomputed (others reused from cache)
 }
 
 export function requestHasDecision(r: DecisionRequest): boolean {
@@ -37,7 +37,7 @@ function cachedProject(cache: Cache | undefined, inputs: ProjectionInputs, sc: S
   if (hit) return { ...hit, scenarioId: sc.id };
   const p = project(inputs, sc.levers, reserve, horizon, sc.id);
   cache?.set(key, p);
-  recomputed.add(sc.id);
+  recomputed.add(`${tag}:${sc.id}`);
   return p;
 }
 
