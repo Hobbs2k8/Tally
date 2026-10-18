@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { log } from "@/lib/observability";
 import { runPipeline } from "@/lib/pipeline/run";
+import { warm } from "@/lib/warmup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,4 +30,10 @@ export async function POST(req: Request) {
     },
   });
   return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" } });
+}
+
+/** Warm-up ping: the page calls this on load so the first plan is fast. */
+export async function GET() {
+  await warm();
+  return Response.json({ ok: true });
 }

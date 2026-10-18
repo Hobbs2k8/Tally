@@ -144,28 +144,26 @@ export async function runPipeline(request: string, opts: RunOptions = {}): Promi
     log("info", "route", { requestId, capabilities: route.capabilities.join(","), mode: route.mode });
     const has = (c: string) => route.capabilities.includes(c as never);
 
-    // 5. Capabilities. Independent work runs concurrently, each in its own span.
+    // 5. Capabilities. The engine is synchronous CPU work, so these run one after
+    // another, each in its own span (see docs/OBSERVABILITY.md: Promise.all here
+    // bought no parallelism and produced overlapping, misleading spans).
     const assumptions = has("flight_simulator") || has("chaos_simulator") ? buildAssumptions(task, data, inputs) : null;
-    const [findings, leaks, answer, sim, counterfactual, negotiation] = await Promise.all([
-      has("money_detective") ? stage(emit, timings, "investigate", "Investigating", () => investigate(data), (f) => `${f.length} findings`) : null,
-      has("profit_leak_radar") ? stage(emit, timings, "leaks", "Scanning for profit leaks", () => profitLeaks(data), (l) => `${l.length} leaks`) : null,
-      has("future_accountant") ? stage(emit, timings, "answer", "Answering from the books", () => answerQuestion(task, data, inputs)) : null,
-      assumptions
-        ? stage(emit, timings, "simulate", has("chaos_simulator") ? "Simulating and stress testing" : "Simulating", () =>
-            simulateTraced(inputs, assumptions, task.stress.requested || has("chaos_simulator")),
-          (s) => `${s.scenarios.length} scenarios, ${s.search?.candidatesEvaluated ?? 0} plan variants`)
-        : null,
-      has("time_machine") ? stage(emit, timings, "time_machine", "Replaying history", () => onTimePaymentCounterfactual(data, matchCustomer(data, task.counterfactual?.customerName ?? null))) : null,
-      has("negotiation_coach")
-        ? stage(emit, timings, "negotiate", "Comparing terms", () =>
-            compareTermOptions(inputs, { ...NO_LEVERS }, inputs.defaultReserve, 13, {
-              vendorExtraDays: task.decisions.vendorTermsExtraDays ?? undefined,
-              discountPct: task.decisions.earlyPayDiscountPct ?? undefined,
-              priceChangePct: task.decisions.priceChangePct ?? undefined,
-            }),
-          )
-        : null,
-    ]);
+    const findings = has("money_detective") ? await stage(emit, timings, "investigate", "Investigating", () => investigate(data), (f) => `${f.length} findings`) : null;
+    const leaks = has("profit_leak_radar") ? await stage(emit, timings, "leaks", "Scanning for profit leaks", () => profitLeaks(data), (l) => `${l.length} leaks`) : null;
+    const answer = has("future_accountant") ? await stage(emit, timings, "answer", "Answering from the books", () => answerQuestion(task, data, inputs)) : null;
+    const sim = assumptions
+      ? await stage(emit, timings, "simulate", has("chaos_simulator") ? "Simulating and stress testing" : "Simulating", () => simulateTraced(inputs, assumptions, task.stress.requested || has("chaos_simulator")), (s) => `${s.scenarios.length} scenarios, ${s.search?.candidatesEvaluated ?? 0} plan variants`)
+      : null;
+    const counterfactual = has("time_machine") ? await stage(emit, timings, "time_machine", "Replaying history", () => onTimePaymentCounterfactual(data, matchCustomer(data, task.counterfactual?.customerName ?? null))) : null;
+    const negotiation = has("negotiation_coach")
+      ? await stage(emit, timings, "negotiate", "Comparing terms", () =>
+          compareTermOptions(inputs, { ...NO_LEVERS }, inputs.defaultReserve, 13, {
+            vendorExtraDays: task.decisions.vendorTermsExtraDays ?? undefined,
+            discountPct: task.decisions.earlyPayDiscountPct ?? undefined,
+            priceChangePct: task.decisions.priceChangePct ?? undefined,
+          }),
+        )
+      : null;
 
     // 6. Validate every number against the engine's constraints.
     const validation = await stage(emit, timings, "validate", "Verifying", () => validate(data, inputs, sim, assumptions), (v) => `${v.filter((c) => c.ok).length}/${v.length} checks pass`);

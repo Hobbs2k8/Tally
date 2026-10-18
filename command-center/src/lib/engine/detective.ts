@@ -18,11 +18,12 @@ export interface Finding {
 }
 
 export function overdueFindings(data: CompanyData, asOf = data.asOfDay): Finding[] {
-  const open = openReceivables(data, asOf).filter((o) => o.daysPastDue > 0);
+  const all = openReceivables(data, asOf);
+  const open = all.filter((o) => o.daysPastDue > 0);
   if (!open.length) return [];
   const beh = paymentBehavior(data, asOf);
   const total = open.reduce((s, o) => s + o.open, 0);
-  const allOpen = openReceivables(data, asOf).reduce((s, o) => s + o.open, 0);
+  const allOpen = all.reduce((s, o) => s + o.open, 0);
   const byCustomer = new Map<string, typeof open>();
   for (const o of open) {
     if (!byCustomer.has(o.customerId)) byCustomer.set(o.customerId, []);

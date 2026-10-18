@@ -2,16 +2,26 @@
 //   REASONING_PROVIDER=gemini|deterministic|systemone
 //   default: gemini when GEMINI_API_KEY is set, else deterministic
 import { DeterministicProvider } from "./deterministic";
+import { GeminiProvider, sdkClient } from "./gemini";
 import { SystemOneProvider } from "./systemone";
 import type { ReasoningProvider } from "./types";
 
 let cached: ReasoningProvider | null = null;
 
+export function makeProvider(name: string): ReasoningProvider {
+  const key = process.env.GEMINI_API_KEY;
+  if (name === "systemone") return new SystemOneProvider();
+  if (name === "gemini") {
+    if (!key) throw new Error("REASONING_PROVIDER=gemini needs GEMINI_API_KEY");
+    return new GeminiProvider(sdkClient(key), key, process.env.GEMINI_MODEL || null);
+  }
+  return new DeterministicProvider();
+}
+
 export function getProvider(): ReasoningProvider {
   if (cached) return cached;
-  const want = (process.env.REASONING_PROVIDER || "").toLowerCase();
-  if (want === "systemone") cached = new SystemOneProvider();
-  else cached = new DeterministicProvider();
+  const want = (process.env.REASONING_PROVIDER || (process.env.GEMINI_API_KEY ? "gemini" : "deterministic")).toLowerCase();
+  cached = makeProvider(want);
   return cached;
 }
 

@@ -18,15 +18,24 @@ export const sentryEnabled = () => Boolean(process.env.SENTRY_DSN || process.env
 
 export async function stage<T>(emit: Emit, timings: Record<string, number>, name: string, label: string, fn: () => Promise<T> | T, detail?: (r: T) => string): Promise<T> {
   emit({ type: "stage", stage: name, label, status: "start" });
+  // Duration is measured inside the span callback: synchronous work ends when fn
+  // returns, async work when its promise settles. (Measuring after an outer
+  // await would fold in whatever else ran on the event loop meanwhile.)
+  let ms = 0;
   const t0 = performance.now();
   try {
-    const result = await Sentry.startSpan({ name: `pipeline.${name}`, op: "pipeline.stage", attributes: { stage: name } }, () => fn());
-    const ms = performance.now() - t0;
+    const result = await Sentry.startSpan({ name: `pipeline.${name}`, op: "pipeline.stage", attributes: { stage: name } }, () => {
+      const start = performance.now();
+      const r = fn();
+      if (r instanceof Promise) return r.then((v) => ((ms = performance.now() - start), v));
+      ms = performance.now() - start;
+      return r;
+    });
     timings[name] = (timings[name] ?? 0) + ms;
     emit({ type: "stage", stage: name, label, status: "done", ms, detail: detail?.(result) });
     return result;
   } catch (e) {
-    const ms = performance.now() - t0;
+    ms = ms || performance.now() - t0;
     timings[name] = (timings[name] ?? 0) + ms;
     emit({ type: "stage", stage: name, label, status: "error", ms, detail: e instanceof Error ? e.message : String(e) });
     throw e;

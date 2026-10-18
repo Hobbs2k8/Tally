@@ -65,26 +65,24 @@ export function project(inputs: ProjectionInputs, levers: Levers, reserve: numbe
 
   // Invoiced sales collect along the historical curve, shifted by any delay.
   // An early-payment discount moves the adopting share into the issue week at a discount.
+  // (Flows are accumulated straight into per-week arrays: the plan search calls this hundreds of times.)
   const disc = levers.earlyPayDiscount;
   const adopt = disc ? Math.min(1, Math.max(0, disc.adoptionPct)) : 0;
+  const newSales = new Array<number>(H).fill(0);
+  const curve = inputs.collectionCurve;
   for (let w = 0; w < H; w++) {
     const invoiced = inputs.weeklyInvoicedSales * volume[w] * priceFactor;
     const pos = inputs.weeklyPosSales * volume[w] * priceFactor;
     rows[w].revenue += invoiced + pos;
     rows[w].inflows.pos += pos;
     if (adopt > 0 && disc) {
-      const early = invoiced * adopt * (1 - disc.discountPct);
-      const wk = w + 1 + delayWeeks; // pays within ~10 days
-      const tmp = new Array(H).fill(0);
-      addFractional(tmp, wk, early);
-      tmp.forEach((x, i) => (rows[i].inflows.newSales += x));
+      addFractional(newSales, w + 1 + delayWeeks, invoiced * adopt * (1 - disc.discountPct)); // pays within ~10 days
       rows[w].revenue -= invoiced * adopt * disc.discountPct;
     }
     const normal = invoiced * (1 - adopt);
-    const tmp = new Array(H).fill(0);
-    inputs.collectionCurve.forEach((share, k) => addFractional(tmp, w + k + delayWeeks, normal * share));
-    tmp.forEach((x, i) => (rows[i].inflows.newSales += x));
+    if (normal) for (let k = 0; k < curve.length; k++) if (curve[k]) addFractional(newSales, w + k + delayWeeks, normal * curve[k]);
   }
+  for (let w = 0; w < H; w++) rows[w].inflows.newSales += newSales[w];
 
   // --- Outflows ----------------------------------------------------------------
   for (const b of inputs.openAP) {
@@ -99,19 +97,19 @@ export function project(inputs: ProjectionInputs, levers: Levers, reserve: numbe
     }
   }
   const varLagWeeks = (inputs.variableCostLagDays + levers.vendorTermsExtraDays) / 7;
+  const variable = new Array<number>(H).fill(0);
   for (let w = 0; w < H; w++) {
     const baseVolumeSales = (inputs.weeklyInvoicedSales + inputs.weeklyPosSales) * volume[w];
     const varCost = baseVolumeSales * inputs.variableCostRatio * costFactor;
     rows[w].operatingCost += varCost;
-    const tmp = new Array(H).fill(0);
-    addFractional(tmp, w + varLagWeeks, varCost);
-    tmp.forEach((x, i) => (rows[i].outflows.variable += x));
+    addFractional(variable, w + varLagWeeks, varCost);
 
     rows[w].outflows.payroll += inputs.weeklyPayroll;
     for (const h of levers.hires) if (w >= h.startWeek) rows[w].outflows.newHires += h.count * h.weeklyWage;
     rows[w].outflows.overhead += inputs.weeklyOverhead * costFactor;
     if (w >= levers.marketingStartWeek) rows[w].outflows.marketing += levers.marketingWeekly;
   }
+  for (let w = 0; w < H; w++) rows[w].outflows.variable += variable[w];
   for (const d of levers.ownerDraws) if (d.week >= 0 && d.week < H) rows[d.week].outflows.ownerDraws += d.amount;
   for (const o of levers.oneTime) if (o.week >= 0 && o.week < H) rows[o.week].outflows.oneTime += o.amount;
 

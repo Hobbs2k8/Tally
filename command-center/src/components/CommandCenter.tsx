@@ -38,6 +38,7 @@ export function CommandCenter({ providerLabel }: { providerLabel: string }) {
 
   useEffect(() => {
     fetch("/api/companies").then((r) => r.json()).then(setCompanies).catch(() => setError("Could not load companies"));
+    fetch("/api/plan").catch(() => {}); // warm the engine while the user reads the page
   }, []);
 
   const company = useMemo(() => companies.find((c) => c.id === companyId), [companies, companyId]);
