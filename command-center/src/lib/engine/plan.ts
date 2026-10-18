@@ -25,6 +25,9 @@ export interface PlanSettings {
   reserve: number;
   horizonWeeks: number;
   stressDelayDays: number;
+  /** Optional extra shocks in the stress case (fractions). */
+  stressSalesDecline?: number;
+  stressCostShock?: number;
   collectOverdue: { recoveryPct: number; withinDays: number } | null;
   /** Extra supplier days the plan may ask for (0 disables this protective option). */
   vendorTermsAskDays: number;
@@ -147,7 +150,7 @@ export function searchSafestPlan(inputs: ProjectionInputs, req: DecisionRequest,
   const wsum = weights.hires + weights.marketing + weights.draw || 1;
   const hasOverdue = inputs.openAR.some((a) => a.daysPastDue > 0);
   const base = baseLevers(req, s);
-  const stress = { salesDecline: 0, paymentDelayDays: s.stressDelayDays, costShock: 0 };
+  const stress = stressOf(s);
 
   // Protective option: ask suppliers for longer terms. Small value penalty so
   // the plan only leans on a negotiation when it needs to.
@@ -208,6 +211,41 @@ export function searchSafestPlan(inputs: ProjectionInputs, req: DecisionRequest,
     changes,
     candidates,
   };
+}
+
+/** Short phrases for how a recommended plan differs from the request (for one-line summaries). */
+export function shortChanges(levers: Levers, req: DecisionRequest, fmt: (c: number) => string): string[] {
+  const out: string[] = [];
+  if (levers.collectOverdue) out.push("chase overdue invoices first");
+  const n = req.hires?.count ?? 0;
+  if (n > 0) {
+    const total = levers.hires.reduce((s, h) => s + h.count, 0);
+    if (!total) out.push("hold off on hiring");
+    else if (levers.hires.length === 1 && total === n && levers.hires[0].startWeek > 0) out.push(`${n === 2 ? "hire both" : `hire all ${n}`} in week ${levers.hires[0].startWeek + 1}`);
+    else if (levers.hires.length > 1) out.push(`stagger hires (${levers.hires.map((h) => `${h.count} ${h.startWeek ? `in week ${h.startWeek + 1}` : "now"}`).join(", ")})`);
+    else if (total < n) out.push(`hire ${total} of ${n}${levers.hires[0].startWeek ? ` in week ${levers.hires[0].startWeek + 1}` : " now"}`);
+  }
+  const m = req.marketingWeekly ?? 0;
+  if (m > 0) {
+    if (!levers.marketingWeekly) out.push("defer the marketing increase");
+    else if (levers.marketingWeekly < m) out.push("start marketing at half the increase");
+    else if (levers.marketingStartWeek > 0) out.push(`start marketing in week ${levers.marketingStartWeek + 1}`);
+  }
+  const d = req.ownerDraw ?? 0;
+  if (d > 0) {
+    const draws = levers.ownerDraws;
+    const total = draws.reduce((s, x) => s + x.amount, 0);
+    if (!total) out.push("skip the owner draw this quarter");
+    else if (draws.length > 1) out.push(`split the ${fmt(d)} draw (${draws.map((x) => `${fmt(x.amount)} in week ${x.week + 1}`).join(", ")})`);
+    else if (total < d) out.push(`take ${fmt(total)} of the draw in week ${draws[0].week + 1}`);
+    else if (draws[0].week > 0) out.push(`take the ${fmt(d)} draw in week ${draws[0].week + 1}`);
+  }
+  if (levers.vendorTermsExtraDays > (req.vendorTermsExtraDays ?? 0)) out.push(`ask suppliers for ${levers.vendorTermsExtraDays - (req.vendorTermsExtraDays ?? 0)} more days`);
+  return out;
+}
+
+export function stressOf(s: PlanSettings) {
+  return { salesDecline: s.stressSalesDecline ?? 0, paymentDelayDays: s.stressDelayDays, costShock: s.stressCostShock ?? 0 };
 }
 
 export function isFeasible(base: Projection, stress: Projection, reserve: number): boolean {
